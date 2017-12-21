@@ -167,6 +167,9 @@ public class dbCopyFrame extends JFrame {
                     ascopy.setProgressIndicators(copyProgressBar, errorCountLabel);
                     ascopy.setCopying(true);
 
+                    // set the base uri for digital objects
+                    ascopy.setDigitalObjectBaseURI(doURLTextField.getText().trim());
+
                     // try getting the session and only continue if a valid session is return;
                     if(!ascopy.getSession()) {
                         consoleTextArea.append("No session, nothing to do ...\n");
@@ -251,6 +254,8 @@ public class dbCopyFrame extends JFrame {
                         ascopy.setCollectionsToCopyList(collectionsIDsList);
                         ascopy.copyCollectionRecords(collectionsToCopy);
                     }
+
+                    if (!copyStopped) ascopy.copyDigitalObjectStragglers();
 
                     // now download the digital object files
                     if(downloadCheckBox.isSelected()) {
@@ -551,7 +556,7 @@ public class dbCopyFrame extends JFrame {
         CellConstraints cc = new CellConstraints();
 
         //======== this ========
-        setTitle("Archon Data Migrator v1.0.0 (11-09-2015)");
+        setTitle("Archon Data Migrator v2.x (11-2017)");
         Container contentPane = getContentPane();
         contentPane.setLayout(new BorderLayout());
 

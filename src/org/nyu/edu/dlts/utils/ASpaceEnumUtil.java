@@ -1131,10 +1131,10 @@ public class ASpaceEnumUtil {
      * @return
      */
     public String getASpaceInstanceContainerType(String arID) {
-        if(arID == null || arID.isEmpty()) return "unknown";
+        if(arID == null || arID.isEmpty()) return "";
 
         String key = "container_types_" + arID;
-        return getEnumValueForID(key, "unknown");
+        return getEnumValueForID(key, "");
     }
 
     /**

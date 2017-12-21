@@ -1,25 +1,18 @@
 ArchonMigrator
 ============
 
-This is a small Java desktop Program for migrating Archon data into an Archivesspace instance which replaces the original migration tool.
+The Archon to ArchivesSpace migration tool enables migration of data from an Archon instance to an ArchivesSpace instance. It is the most comprehensive and efficient option for people who have not previously migrated and want to migrate all of their Archon data to ArchivesSpace.
 
-Features of this new tool are
+More instructions and a data mapping are available at on the ArchivesSpace migration tools and data mapping page at http://archivesspace.org/using-archivesspace/migration-tools-and-data-mapping/.
 
-* Migrates records directly in Archivesspace version 1.4.x with no need to first migrate into version 1.0.4.
-* Migrates records into non-empty ASpace instance
-* Similar user interface as the AT migration tool.
-* More robust, failure to migrate single record generally won't result in the tool stopping
-* Improve migration report generation. Only relevant information is provided to users.
-* No need to do any post processing on migrated data to remove empty or unused Classification or Location records
-* Migrate both linked and unlinked digital objects. The current tool only migrate digital objects linked to collections.
-* Automatically remove bbcode tags in titles and replace them with html code or just strip them out
-* Correctly link related Creator records
+We recommend migrating to the latest version of ArchivesSpace when possible. Archon users who are ready to move to the latest version of ArchivesSpace should use version ?.?.? of the tool. Archon users who wish to move into a pre-1.5.0 version of ArchivesSpace due to the container management changes should use version 1.0.1 of the tool.
 
-####Using
+## Running the Archon migration tool
 
-1. Unpack the zip file in a convenient location.
-2. From the command line, change into the ArchonMigrator directory and execute either "run.bat" (Windows), or "run.sh" (*nix based systems). On windows, it is also possible to double click on the "run.bat" file. This brings up the main application window.
-3. Enter the connection information for the Archon and Archivesspace instances
-4. To download the digital object files stored in the database along with copying the meta data, select "Download Digital Object Files" and set an appropriate download folder by using the "Set Download Folder" button.
-5. Select the "Set Default Repository" to set which Repository Accession and Unlinked digital Objects are copied to. The default one selected, is to copy Accession records to the same repository of any Collection records they are linked to, or the first repository if they are not. You can also select a specific repository from the drop down list.
+1. Read the guidelines for migrating Archon data and prepare your data as needed.
+2. Install ArchivesSpace and ensure that ArchivesSpace is running.
+3. Get the latest JAR file release.
+4. Double-click the JAR file to open up the migration tool interface.
+5. Change the default information in the migration tool user interface as needed.
 6. Press the "Copy To Archives Space" button to start the migration process.
+7. Assess the migration using the migration report and clean up data as needed.

@@ -18,7 +18,7 @@ import java.util.*;
  * Utility class for copying data from the Archon to Archivesspace
  */
 public class ASpaceCopyUtil implements  PrintConsole {
-    public static final String SUPPORTED_ASPACE_VERSION = "v1.3,v1.4";
+    public static final String SUPPORTED_ASPACE_VERSION = "v2.1,v2.2";
 
     // String to indicate when no ids where return from aspace backend
     private final String NO_ID = "no id assigned";
@@ -87,7 +87,8 @@ public class ASpaceCopyUtil implements  PrintConsole {
 
     // hashmap that stores the converted digital objects so that they can be save to the correct repo
     // when saving the collection content
-    private HashMap<String, ArrayList<JSONArray>> digitalObjectMap = new HashMap<String, ArrayList<JSONArray>>();
+    private HashMap<Integer, HashMap<Integer, ArrayList<JSONArray>>> digitalObjectMap =
+            new HashMap<Integer, HashMap<Integer, ArrayList<JSONArray>>>();
 
     // hashmap that maps resource from old database with copy in new database
     private HashMap<String, String> resourceURIMap = new HashMap<String, String>();
@@ -170,8 +171,8 @@ public class ASpaceCopyUtil implements  PrintConsole {
     // the default repository id
     private String defaultRepositoryId;
 
-    // a hash map for storing the parent container information
-    private HashMap<String, ArrayList<String>> containerListMap;
+    // a hashmap for getting Archon enum IDs from enum values
+    private HashMap<String, String> archonValuesToIDs = new HashMap<String, String>();
 
     /**
      * The main constructor, used when running as a stand alone application
@@ -467,7 +468,7 @@ public class ASpaceCopyUtil implements  PrintConsole {
 
             // check to see if the is admin is set to true, otherwise continue
             if(user.getInt("IsAdminUser") == 0 || user.getString("Login").equals("admin")) {
-                print("None admin or duplicate user: " + userName + ", not migrating ...");
+                print("Non admin or duplicate user: " + userName + ", not migrating ...");
                 continue;
             }
 
@@ -1192,7 +1193,8 @@ public class ASpaceCopyUtil implements  PrintConsole {
 
                 // add an instance that holds the location information
                 if(accession.has("Locations")) {
-                    addLocationInstances(accessionJS, accession.getJSONArray("Locations"), "accession");
+                    addLocationInstances(accessionJS, accession.getJSONArray("Locations"), "accession",
+                            null, repoURI);
                 }
 
                 String uri = repoURI + ASpaceClient.ACCESSION_ENDPOINT;
@@ -1326,25 +1328,37 @@ public class ASpaceCopyUtil implements  PrintConsole {
                 }
 
                 // check to see we just not saving the digital objects or copying them now
-                String digitalObjectListKey = null;
+//                String digitalObjectListKey = null;
+                int collectionID = 0;
+                int contentID = 0;
 
                 if(saveDigitalObjectsWithResources) {
-                    if(digitalObject.getInt("CollectionID") != 0) {
-                        digitalObjectListKey = "collection_" + digitalObject.get("CollectionID");
-                    } else if(digitalObject.getInt("CollectionContentID") != 0) {
-                        digitalObjectListKey = "content_" + digitalObject.get("CollectionContentID");
-                    } else {
-                        print("No record to attach digital object " + digitalObjectTitle + "...");
-                        print("Saving to default repository ...");
-                    }
+                    collectionID = digitalObject.getInt("CollectionID");
+                    contentID = digitalObject.getInt("CollectionContentID");
+//                    if(digitalObject.getInt("CollectionID") != 0) {
+//                        if(digitalObject.getInt("CollectionContentID") != 0) {
+//                            digitalObjectListKey = "content_" + digitalObject.get("CollectionContentID");
+//                        } else {
+//                            digitalObjectListKey = "collection_" + digitalObject.get("CollectionID");
+//                        }
+//                    } else {
+//                        print("No record to attach digital object " + digitalObjectTitle + "...");
+//                        print("Saving to default repository ...");
+//                    }
                 }
 
                 // call methods to actually save this digital object to the back end
                 // or store it for saving when saving the resource records
-                if(digitalObjectListKey != null) {
+//                if(digitalObjectListKey != null) {
+                if (collectionID != 0 || contentID != 0) {
                     digitalObjectTotal++;
-                    storeDigitalObject(batchJA, digitalObjectListKey);
+                    storeDigitalObject(batchJA, collectionID, contentID);
+//                    storeDigitalObject(batchJA, digitalObjectListKey);
                 } else {
+
+                    print("No record to attach digital object " + digitalObjectTitle + "...");
+                    print("Saving to default repository ...");
+
                     totalFree++;
                     saveDigitalObject(batchEndpoint, batchJA);
                 }
@@ -1402,16 +1416,30 @@ public class ASpaceCopyUtil implements  PrintConsole {
      *
      * @param batchJA
      *
-     * @param digitalObjectListKey
+     * @param contentID
+     * @param collectionID
      */
-    private void storeDigitalObject(JSONArray batchJA, String digitalObjectListKey) {
-        ArrayList<JSONArray> digitalObjectList = new ArrayList<JSONArray>();
+    private void storeDigitalObject(JSONArray batchJA, int collectionID, int contentID) {//String digitalObjectListKey) {
 
-        if(digitalObjectMap.containsKey(digitalObjectListKey)) {
-            digitalObjectList = digitalObjectMap.get(digitalObjectListKey);
-        } else {
-            digitalObjectMap.put(digitalObjectListKey, digitalObjectList);
+        HashMap<Integer, ArrayList<JSONArray>> collectionMap = digitalObjectMap.get(collectionID);
+
+        if (collectionMap == null) {
+            collectionMap = new HashMap<Integer, ArrayList<JSONArray>>();
+            digitalObjectMap.put(collectionID, collectionMap);
         }
+
+        ArrayList<JSONArray> digitalObjectList = collectionMap.get(contentID);
+
+        if (digitalObjectList == null) {
+            digitalObjectList = new ArrayList<JSONArray>();
+            collectionMap.put(contentID, digitalObjectList);
+        }
+
+//        if(digitalObjectMap.containsKey(digitalObjectListKey)) {
+//            digitalObjectList = digitalObjectMap.get(digitalObjectListKey);
+//        } else {
+//            digitalObjectMap.put(digitalObjectListKey, digitalObjectList);
+//        }
 
         digitalObjectList.add(batchJA);
     }
@@ -1503,9 +1531,6 @@ public class ASpaceCopyUtil implements  PrintConsole {
                 return;
             }
 
-            // create a new container list map
-            containerListMap = new HashMap<String, ArrayList<String>>();
-
             // get the collection record
             JSONObject collection = records.getJSONObject(keys.next());
 
@@ -1514,6 +1539,7 @@ public class ASpaceCopyUtil implements  PrintConsole {
 
             // get the record id
             String dbId = collection.getString("ID");
+            int intID = Integer.parseInt(dbId);
 
             // get the parent repository
             String repositoryID = collection.getString("RepositoryID");
@@ -1582,16 +1608,11 @@ public class ASpaceCopyUtil implements  PrintConsole {
                 }
 
                 // add the instances
-                //addInstances(resourceJS, resource, repository, repoURI + "/");
-                addDigitalInstances(resourceJS, "collection_" + dbId, collectionTitle, batchEndpoint);
+//                addDigitalInstances(resourceJS, "collection_" + dbId, collectionTitle, batchEndpoint);
+                addDigitalInstances(resourceJS, intID, 0, collectionTitle, batchEndpoint);
 
                 // add the linked accessions
                 addRelatedAccessions(resourceJS, dbId, arId, repoURI + "/");
-
-                // add an instance that holds the location information
-                if(collection.has("Locations")) {
-                    addLocationInstances(resourceJS, collection.getJSONArray("Locations"), "text");
-                }
 
                 // if we using batch import then we not not going to
                 resourceJS.put("uri", endpoint + "/" + dbId);
@@ -1602,14 +1623,24 @@ public class ASpaceCopyUtil implements  PrintConsole {
                 String resourceURI = endpoint + "/" + dbId;
                 String aoEndpoint = repoURI + ASpaceClient.ARCHIVAL_OBJECT_ENDPOINT;
 
-                // use a hash set to store a list of physical only component which have already
-                // been added as an instance
-                HashSet<String> createdInstances = new HashSet<String>();
-                HashSet<String> physicalComponents = new HashSet<String>();
+                // map of intellectual component IDs to their JSON objects
                 HashMap<String, JSONObject> intellectualComponents = new HashMap<String, JSONObject>();
+                HashMap<String, String> intellectualComponentParents = new HashMap<String, String>();
 
                 // add any archival objects here
                 JSONObject resourceComponents = archonClient.getCollectionContentRecords(dbId);
+
+                // stores any component IDs that are referenced as parents but not actually in the database
+                HashSet<String> notFoundIDs = new HashSet<String>();
+
+                // maps saved top container type/indicator combos with its uri in ASpace
+                HashMap<String, String> topContainerURIs = new HashMap<String, String>();
+
+                // maps a physical component ID with that component's parent's ID
+                HashMap<String, String> physicalComponentsToParentIDs = new HashMap<String, String>();
+
+                // map a physical component ID with that components hierarchy of physical components (for containers)
+                HashMap<String, Stack<JSONObject>> physicalComponentsData = new HashMap<String, Stack<JSONObject>>();
 
                 Iterator<String> ckeys = resourceComponents.sortedKeys();
                 while (ckeys.hasNext()) {
@@ -1619,6 +1650,7 @@ public class ASpaceCopyUtil implements  PrintConsole {
                     int contentType = component.getInt("ContentType");
                     String cid = component.getString("ID");
 
+                    // add an resource component if component is not physical only
                     if(contentType != 2) {
                         JSONObject componentJS = mapper.convertCollectionContent(component);
 
@@ -1626,23 +1658,50 @@ public class ASpaceCopyUtil implements  PrintConsole {
                             componentJS.put("resource", mapper.getReferenceObject(resourceURI));
 
                             // set the parent component if needed
-                            int rootContentId = component.getInt("RootContentID");
-                            int parentId = component.getInt("ParentID");
+                            int parentId = 0;
 
-                            ArrayList<String> containerList = new ArrayList<String>();
-                            if (rootContentId != 0 && parentId != 0) {
-                                parentId = getParentId(resourceComponents, containerList, componentJS, parentId);
+                            String nextComponentID = component.getString("ParentID");
+                            int loopCount = 0;
 
-                                // parent id might still actually be zero, which would cause a save error
-                                if(parentId != 0) {
-                                    String parentURI = aoEndpoint + "/" + parentId;
-                                    componentJS.put("parent", mapper.getReferenceObject(parentURI));
+                            // find the first intellectual parent component if there is one
+                            while (!nextComponentID.equals("0")) {
+
+                                // avoid getting stuck in an infinite loop if references circle back around
+                                if (nextComponentID.equals(cid)) break;
+                                if (++loopCount > 12) {
+                                    break;
                                 }
 
-                                addComponentToParentMap(parentMap, parentId, componentJS);
-                            } else {
-                                addComponentToParentMap(parentMap, 0, componentJS);
+                                // find the next parent component
+                                JSONObject nextComponent;
+                                try {
+                                    nextComponent = resourceComponents.getJSONObject(nextComponentID);
+                                } catch (JSONException e) {
+                                    // if a parent doesn't exist, save component at top level but don't publish
+                                    notFoundIDs.add(nextComponentID);
+                                    componentJS.put("publish", false);
+                                    break;
+                                }
+
+                                // if the component is not physical only it can be the parent and we're done
+                                if (nextComponent.getInt("ContentType") != 2) {
+                                    parentId = nextComponent.getInt("ID");
+                                    break;
+                                }
+
+                                // otherwise try again with that component's parent
+                                nextComponentID = nextComponent.getString("ParentID");
                             }
+
+                            // if we found a parent add a reference to it here
+                            // parent id might still actually be zero, which would cause a save error
+                            if(parentId != 0) {
+                                String parentURI = aoEndpoint + "/" + parentId;
+                                componentJS.put("parent", mapper.getReferenceObject(parentURI));
+                            }
+
+                            // add mapping of component to parent
+                            intellectualComponentParents.put(cid, parentId + "");
 
                             // add the subjects now
                             subjectAsCreatorsList = addSubjects(componentJS, component.getJSONArray("Subjects"), title);
@@ -1653,10 +1712,9 @@ public class ASpaceCopyUtil implements  PrintConsole {
                             // linked subjects which are creators as agents
                             addSubjectsAsCreators(linkedAgentsJA, subjectAsCreatorsList, title);
 
-                            // add the instances
-                            addInstances(createdInstances, containerList, component, componentJS);
-
-                            addDigitalInstances(componentJS, "content_" + cid, collectionTitle, batchEndpoint);
+                            // add the digital instances
+//                            addDigitalInstances(componentJS, "content_" + cid, collectionTitle, batchEndpoint);
+                            addDigitalInstances(componentJS, intID, Integer.parseInt(cid), collectionTitle, batchEndpoint);
 
                             // save this json record now to get the URI
                             componentJS.put("uri", aoEndpoint + "/" + cid);
@@ -1665,34 +1723,115 @@ public class ASpaceCopyUtil implements  PrintConsole {
                             // store this component so we can add any instances later
                             intellectualComponents.put(cid, componentJS);
 
-                            batchJA.put(componentJS);
-
                             print("Copied Resource Component: " + title + " :: " + cid + "\n");
                         } else {
                             print("Fail -- Resource Component to JSON: " + title);
                         }
-                    } else {
-                        String componentId = component.getString("ID");
-                        physicalComponents.add(componentId);
+                    }
+
+                    // prepare to add an instance (and container data) if it is a physical component
+                    if (contentType != 1){
+
+                        String intellectualParentID = null;
+
+                        // this holds the chain of parent physical components for the component
+                        Stack<JSONObject> componentChain = new Stack<JSONObject>();
+                        String nextComponentID = cid;
+
+                        // find the intellectual parent and physical hierarchy
+                        while (!nextComponentID.equals("0")) {
+
+                            JSONObject nextComponent;
+                            try {
+                                nextComponent = resourceComponents.getJSONObject(nextComponentID);
+                            } catch (JSONException e) {
+                                // if a referenced parent is not actually in Archon
+                                notFoundIDs.add(nextComponentID);
+                                break;
+                            }
+
+                            // if it is a physical component add it to the stack
+                            if (nextComponent.getInt("ContentType") != 1) {
+
+                                // check to be sure we're not stuck in an infinite loop
+                                if (!componentChain.contains(nextComponent)) componentChain.push(nextComponent);
+                                else break;
+                            }
+
+                            // if it is an intellectual component and we haven't found a parent yet, make it the parent
+                            if (intellectualParentID == null && nextComponent.getInt("ContentType") != 2) {
+                                intellectualParentID = nextComponent.getString("ID");
+                            }
+                            nextComponentID = nextComponent.getString("ParentID");
+                        }
+
+                        // just in case there is an issue and we end up with an empty stack
+                        if (componentChain.size() == 0) componentChain.push(component);
+
+                        // save the hierarchy/parent data we just found so we can add an instance later
+                        physicalComponentsToParentIDs.put(cid, intellectualParentID);
+                        physicalComponentsData.put(cid, componentChain);
                     }
                 }
 
-                // now add any instances to the physically only components
-                addInstancesForPhysicalComponents(batchJA, aoEndpoint, createdInstances, physicalComponents,
-                        intellectualComponents, resourceJS, resourceComponents);
+                // now add instances for the physical components
+                for (String id: physicalComponentsToParentIDs.keySet()) {
+
+                    // get the parent's ASpace JSON record
+                    String parentId = physicalComponentsToParentIDs.get(id);
+                    JSONObject parentJSON = intellectualComponents.get(parentId);
+                    if (parentJSON == null) parentJSON = resourceJS;
+
+                    // add an instance for this physical component to the parent's JSON record
+                    Stack<JSONObject> componentChain = physicalComponentsData.get(id);
+                    addInstance(parentJSON, componentChain, topContainerURIs, repoURI);
+
+                    // add any digital objects linked to the physical component in archon
+                    // they linked to the component's parent in ASpace since digital object can't be linked to container
+//                    addDigitalInstances(parentJSON, "content_" + id, null, batchEndpoint);
+                    addDigitalInstances(parentJSON, intID, Integer.parseInt(id), null, batchEndpoint);
+                }
+
+                // add an instance that holds the location information
+                if(collection.has("Locations")) {
+                    addLocationInstances(resourceJS, collection.getJSONArray("Locations"), "text",
+                            topContainerURIs, repoURI);
+                }
+
+                // add any digital instances that were attached to a component that was not found
+                HashMap<Integer, ArrayList<JSONArray>> collectionDOMap = digitalObjectMap.get(intID);
+                if (collectionDOMap != null) {
+                    Integer[] notFoundKeys = collectionDOMap.keySet().toArray(new Integer[0]);
+                    for (int id : notFoundKeys) {
+                        notFoundIDs.add(id + "");
+                        addDigitalInstances(resourceJS, intID, id, collectionTitle, batchEndpoint);
+                    }
+                }
+
+                // remove the entire resource from the digital object map so we'll know it was found
+                digitalObjectMap.remove(intID);
+
+                // add warning about any component IDs that were missing from Archon
+                if (notFoundIDs.size() != 0) {
+                    StringBuilder errorMessage = new StringBuilder();
+                    errorMessage.append("Could not find ").append(notFoundIDs.size())
+                            .append(" component(s) for resource: ").append(arId).append("\nNot found components:");
+                    for (String id : notFoundIDs) errorMessage.append(" ").append(id);
+                    errorMessage.append("\nReferencing child components/digital objects will have root resource record as parent.");
+                    errorMessage.append("\nReferencing child components will be unpublished.\n");
+                    addErrorMessage(errorMessage.toString());
+                }
+
+                // add the components to the batch JA
+                HashSet<String> added = new HashSet<String>();
+                for (String cid : intellectualComponents.keySet()) {
+                    addComponentToBatch(cid, batchJA, intellectualComponentParents, intellectualComponents, added);
+                }
 
                 // free some memory now
                 freeMemory();
 
                 print("Batch Copying Resource # " + count + " || Title: " + collectionTitle);
-
-                // redo the sort order so we don't have any collisions and things are sorted correctly
-                String invalidChildRecordIds = redoComponentSortOrder(parentMap);
-                if(!invalidChildRecordIds.isEmpty()) {
-                    String message = "Invalid Parent/Child Relationship for Collection: "  + collectionTitle  +
-                            " :: " + currentRecordIdentifier + "\nContent Ids (" + invalidChildRecordIds + ")\n";
-                    addErrorMessage(message);
-                }
 
                 String bids = saveRecord(batchEndpoint, batchJA.toString(2), arId);
                 if (!bids.equals(NO_ID)) {
@@ -1731,205 +1870,310 @@ public class ASpaceCopyUtil implements  PrintConsole {
     }
 
     /**
-     * Method add any instances to the resource record which have not been added to component
-     * records already. This method is a mess due to the conflation of intellectual and physical arrangement
+     * method to add all the resource components to the JSON Array in an acceptable order for batch saving
+     *
+     * @param cid
      * @param batchJA
-     * @param createdInstances
-     * @param physicalComponents
+     * @param intellectualComponentParents
      * @param intellectualComponents
-     * @param resourceJS
-     * @param resourceComponents
+     * @param added
+     */
+    private void addComponentToBatch(String cid, JSONArray batchJA, HashMap<String, String> intellectualComponentParents,
+                                     HashMap<String, JSONObject> intellectualComponents, HashSet<String> added) {
+
+        // make sure we don't add a duplicate
+        if (!added.contains(cid)) {
+
+            String nextID = cid;
+            int loopCount = 0;
+
+            // check that the parent relationship is valid
+            while (!nextID.equals("0")) {
+                nextID = intellectualComponentParents.get(nextID);
+                if (added.contains(nextID)) break;
+                if (++loopCount > 12 || nextID == null) {
+                    intellectualComponents.get(cid).remove("parent");
+                    intellectualComponentParents.put(cid, "0");
+                    break;
+                }
+            }
+
+            // unless it's a top level component make sure it's parent has been added to the batch array first
+            if (!intellectualComponentParents.get(cid).equals("0")) {
+                addComponentToBatch(intellectualComponentParents.get(cid), batchJA, intellectualComponentParents,
+                        intellectualComponents, added);
+            }
+
+            // add the component to the batch array and the set of IDs that have already been added
+            batchJA.put(intellectualComponents.get(cid));
+            added.add(cid);
+        }
+    }
+
+    /**
+     * method to figure out what the container type and indicator should be for a linked location based on location content
+     * sometimes the content field will be making an obvious reference to an existing container - this method identifies those
+     * this could be made to work for more situations but its not really worth expending too much migration time on
+     *
+     * @param content
+     * @return
+     */
+    private String[] getTypeAndIndicator(String content) {
+        String containerType;
+        String containerIndicator;
+        String[] splitId = content.split(" ");
+        String containerTypeID = null;
+
+        // account for plural forms of Archon's default physical content types
+        if (splitId[0].equalsIgnoreCase("boxes")) splitId[0] = "box";
+        else if (splitId[0].equalsIgnoreCase("folders")) splitId[0] = "folder";
+
+        // try to find an Archon physical content type that matches
+        // start with just the first word add add on a word at a time, checking for a match whenever a word is added
+        StringBuilder typeSb = new StringBuilder();
+        int indicatorStart = 1;
+        while (indicatorStart < splitId.length) {
+            typeSb.append(splitId[indicatorStart - 1]);
+            containerTypeID = getContainerTypeArchonID(typeSb.toString());
+            if (containerTypeID != null) break;
+            typeSb.append(" ");
+            indicatorStart++;
+        }
+
+        // whatever is leftover after the type is the indicator
+        if (indicatorStart == splitId.length - 1) containerIndicator = splitId[indicatorStart];
+        else {
+            StringBuilder indicatorSb = new StringBuilder();
+            for (int i = indicatorStart; i < splitId.length; i++) indicatorSb.append(splitId[i]);
+            containerIndicator = indicatorSb.toString();
+
+        }
+
+        // if no type was found, type will be empty and the indicator will be location content
+        if (containerTypeID == null) containerIndicator = content;
+
+        // find the ASpace container type the Archon physical content type maps to
+        containerType = enumUtil.getASpaceInstanceContainerType(containerTypeID);
+
+        return new String[]{containerType, containerIndicator};
+    }
+
+    /**
+     * method to add an instance to a resource/component
+     * @param recordJS
+     * @param componentChain
+     * @param topContainerURIs
+     * @param repoURI
      * @throws Exception
      */
-    private void addInstancesForPhysicalComponents(JSONArray batchJA, String aoEndpoint,
-                                                   HashSet<String> createdInstances,
-                                                   HashSet<String> physicalComponents,
-                                                   HashMap<String, JSONObject> intellectualComponents,
-                                                   JSONObject resourceJS,
-                                                   JSONObject resourceComponents) throws Exception {
-        for (String componentId : physicalComponents) {
-            if (!createdInstances.contains(componentId)) {
-                ArrayList<String> containerList = new ArrayList<String>();
-                JSONObject component = resourceComponents.getJSONObject(componentId);
+    private void addInstance(JSONObject recordJS, Stack<JSONObject> componentChain, HashMap<String, String> topContainerURIs,
+                             String repoURI) throws Exception {
 
-                int rootContentId = component.getInt("RootContentID");
-                int parentId = component.getInt("ParentID");
+        // the first item in the component chain becomes the top container
+        JSONObject topLevel = componentChain.pop();
 
-                if (parentId == 0) {
-                    addContainerListInformation(containerList, component);
-                    addComponentForPhysicalOnlyRecord(batchJA, aoEndpoint, resourceJS, null, containerList);
-                } else if (rootContentId != 0 && parentId != 0) {
-                    int topParentId = getParentId(resourceComponents, containerList, null, parentId);
+        String containerType;
+        String containerIndicator;
 
-                    if (topParentId == parentId) {
-                        addContainerListInformation(containerList, component);
-                    }
+        containerType = enumUtil.getASpaceInstanceContainerType(topLevel.getString("ContainerTypeID"));
+        containerIndicator = topLevel.getString("ContainerIndicator");
 
-                    // now check to see if we adding this to a component or the resource record
-                    if(parentId == 0) {
-                        addComponentForPhysicalOnlyRecord(batchJA, aoEndpoint, resourceJS, null, containerList);
-                    } else {
-                        JSONObject parentJS = intellectualComponents.get("" + topParentId);
+        // add top container or get a reference to it if it already exists
+        String containerURI = addTopContainer(containerType, containerIndicator, topContainerURIs, repoURI, null);
+        JSONObject topRef = mapper.getReferenceObject(containerURI);
 
-                        if(parentJS != null) {
-                            addComponentForPhysicalOnlyRecord(batchJA, aoEndpoint, resourceJS, parentJS, containerList);
-                        } else {
-                            String message = "Unable to locate parent record for instance: " + containerList.get(0) + "\n";
-                            addErrorMessage(message);
-                        }
-                    }
-                }
+        // create a json object for the instance
+        JSONObject json = new JSONObject();
 
-                print("Creating Instance: " + componentId + " Added to Parent: " + parentId);
-            }
-        }
-    }
+        json.put("instance_type", "text");
 
-    /**
-     * This is used to create a component record for physical only component which does not have any child record
-     *
-     * @param batchJA
-     * @param aoEndpoint
-     * @param resourceJS
-     * @param parentJS
-     * @param containerList
-     */
-    private void addComponentForPhysicalOnlyRecord(JSONArray batchJA, String aoEndpoint, JSONObject resourceJS,
-                                                   JSONObject parentJS, ArrayList<String> containerList) throws Exception {
-
-        // create the component record
-        JSONObject componentJS = mapper.convertContainerInformation(aoEndpoint, containerList);
-
-        // add the container information
-        JSONArray instancesJA = new JSONArray();
-        componentJS.put("instances", instancesJA);
-        createInstance(null, containerList, instancesJA, componentJS.getString("title"));
-
-        // add references for the parent and resource records
-        componentJS.put("resource", mapper.getReferenceObject(resourceJS.getString("uri")));
-        if(parentJS != null) {
-            componentJS.put("parent", mapper.getReferenceObject(parentJS.getString("uri")));
-        }
-
-        batchJA.put(componentJS);
-    }
-
-    /**
-     * Method to add an instance record
-     * @param createdInstances
-     * @param componentJS
-     */
-    private void addInstances(HashSet<String> createdInstances, ArrayList<String> containerList,
-                              JSONObject component, JSONObject componentJS) throws JSONException {
-        JSONArray instancesJA = new JSONArray();
-
-        // get the parent container information
-        ArrayList<String> parentContainerList = null;
-
-        if (componentJS.has("parent")) {
-            String parentId = getIdFromURI(componentJS.getString("parent"));
-            parentContainerList = containerListMap.get(parentId);
-        }
-
-        // see if we have to add an instance for a physical only parents
-        if(component.getInt("ContentType") == 3) {
-            if(containerList != null && containerList.size() != 0) {
-                addContainerListInformation(containerList, component);
-                createInstance(createdInstances, containerList, instancesJA, componentJS.getString("title"));
-            } else {
-                containerList = new ArrayList<String>();
-
-                if(parentContainerList != null) {
-                    containerList.add(parentContainerList.get(0));
-                }
-
-                addContainerListInformation(containerList, component);
-                createInstance(null, containerList, instancesJA, componentJS.getString("title"));
-            }
-        } else {
-            if (containerList != null && containerList.size() != 0) {
-                createInstance(createdInstances, containerList, instancesJA, componentJS.getString("title"));
-            } else {
-                if(parentContainerList != null) {
-                    createInstance(null, parentContainerList, instancesJA, componentJS.getString("title"));
-                }
-            }
-        }
-
-        if (instancesJA.length() != 0) {
-            componentJS.put("instances", instancesJA);
-        }
-    }
-
-    /**
-     *
-     *
-     * @param createdInstances
-     * @param instancesJA
-     * @param containerList
-     * @param title
-     */
-    private void createInstance(HashSet<String> createdInstances, ArrayList<String> containerList,
-                                JSONArray instancesJA, String title) throws JSONException {
-
-        // length of the container list
-        int length = containerList.size();
-
-        JSONObject instanceJS = new JSONObject();
-        instanceJS.put("instance_type", "text");
-
+        // json object for the sub container
         JSONObject containerJS = new JSONObject();
 
-        for (int i = 0; i < length; i++) {
-            String[] sa = containerList.get(i).split("::");
-
-            int position = i + 1;
-            containerJS.put("type_" + position, sa[0]);
-            containerJS.put("indicator_" + position, sa[1]);
-
-            // stored the id in the created instances set so we know not to create and
-            // instance for this object
-            if(createdInstances != null) {
-                createdInstances.add(sa[2]);
-            }
+        // second item in component chain is level 2 container
+        if (!componentChain.isEmpty()) {
+            JSONObject secondLevel = componentChain.pop();
+            containerJS.put("type_2", enumUtil.getASpaceInstanceContainerType(secondLevel.getString("ContainerTypeID")));
+            containerJS.put("indicator_2", secondLevel.getString("ContainerIndicator"));
         }
 
-        instanceJS.put("container", containerJS);
+        // third item in component chain is level 3 container
+        if (!componentChain.isEmpty()) {
+            JSONObject thirdLevel = componentChain.pop();
+            containerJS.put("type_3", enumUtil.getASpaceInstanceContainerType(thirdLevel.getString("ContainerTypeID")));
+            containerJS.put("indicator_3", thirdLevel.getString("ContainerIndicator"));
+        }
 
-        instancesJA.put(instanceJS);
+        // add reference to top container
+        containerJS.put("top_container", topRef);
 
-        print("Added Analog Instance to Record: " + title);
+        // add sub container to instance
+        json.put("sub_container", containerJS);
+
+        // get the instance list from the record or if there is none create an empty one
+        JSONArray instanceJA;
+        try {
+            instanceJA = recordJS.getJSONArray("instances");
+        } catch (JSONException e) {
+            instanceJA = new JSONArray();
+        }
+
+        instanceJA.put(json);
+
+        recordJS.put("instances", instanceJA);
+
     }
 
     /**
-     * Method to add an instance to resource, or resource component record
+     * method to add a top container to ASpace or return the URI of a previously added equivalent one
+     * @param containerType
+     * @param containerIndicator
+     * @param topContainerURIs
+     * @param repoURI
+     * @param location
+     * @return
+     * @throws Exception
+     */
+    private String addTopContainer(String containerType, String containerIndicator, HashMap<String, String> topContainerURIs,
+                                   String repoURI, JSONObject location) throws Exception {
+        String uri;
+
+        // the key that is used to map to uri
+        String containerKey = (containerType + " " + containerIndicator).toLowerCase();
+
+        JSONObject json;
+
+        if (topContainerURIs.containsKey(containerKey)) {
+            // the container already exists so we don't need to do anything else
+            uri =  topContainerURIs.get(containerKey);
+        } else {
+            // create json top container record
+            json = new JSONObject();
+            json.put("indicator", containerIndicator);
+            json.put("type", containerType);
+
+            // if a linked location is specified add its data
+            if (location != null) addLocationInfo(json, location);
+
+            // save the top container record and get its uri
+            String id = saveRecord(repoURI + ASpaceClient.TOP_CONTAINER_ENDPOINT, json.toString(), null);
+            if (!id.equalsIgnoreCase(NO_ID)) {
+                uri = repoURI + ASpaceClient.TOP_CONTAINER_ENDPOINT + "/" + id;
+                print("Copied Top Container: " + containerKey);
+                topContainerURIs.put(containerKey, uri);
+            } else {
+                print("Fail -- Top Container: " + containerKey);
+                return null;
+            }
+        }
+
+        return uri;
+    }
+
+    /**
+     * adds a location reference to a top container record
+     *
+     * @param containerJS
+     * @param location
+     * @throws Exception
+     */
+    private void addLocationInfo(JSONObject containerJS, JSONObject location) throws Exception {
+        // add the extent information
+        String extentNote = "";
+
+        if(location.has("Extent")) {
+            extentNote += location.getString("Extent") + " ";
+            extentNote += enumUtil.getASpaceExtentType(location.getInt("ExtentUnitID"));
+        }
+
+        // add a location record record now
+        String building = location.getString("Location");
+        String coordinate1 = location.getString("RangeValue");
+        String coordinate2 = location.getString("Section");
+        String coordinate3 = location.getString("Shelf");
+
+        String locationURI = getLocationURI(building, coordinate1, coordinate2, coordinate3);
+
+        if(locationURI != null) {
+            Date date = new Date(); // this is need to have valid container_location json record
+
+            JSONArray locationsJA = new JSONArray();
+
+            JSONObject locationJS = new JSONObject();
+            locationJS.put("status", "current");
+            locationJS.put("start_date", date);
+            locationJS.put("note", extentNote);
+            locationJS.put("ref", locationURI);
+
+            locationsJA.put(locationJS);
+
+            // put all the records together now
+            containerJS.put("container_locations", locationsJA);
+        }
+    }
+
+    /**
+     * Method to add a digital instance to resource, or resource component record
      *
      * @param json
      * @param recordTitle the title of the record
      * @throws Exception
      */
-    private void addDigitalInstances(JSONObject json, String recordKey, String recordTitle, String batchEndpoint) throws Exception {
+    private void addDigitalInstances(JSONObject json, int collectionID, int contentID, String recordTitle, String batchEndpoint) throws Exception {
+
         JSONArray instancesJA = new JSONArray();
 
-        if(digitalObjectMap.containsKey(recordKey)) {
-            ArrayList<JSONArray> digitalObjectList = digitalObjectMap.get(recordKey);
+        HashMap<Integer, ArrayList<JSONArray>> collectionMap = digitalObjectMap.get(collectionID);
+        ArrayList<JSONArray> digitalObjectList;
 
-            for(JSONArray batchJA: digitalObjectList) {
-                String digitalObjectURI = saveDigitalObject(batchEndpoint, batchJA);
+        HashMap<Integer, ArrayList<JSONArray>> noCollectionMap = digitalObjectMap.get(0);
 
-                if(digitalObjectURI != null) {
-                    JSONObject instanceJS = new JSONObject();
-                    instanceJS.put("instance_type", "digital_object");
-                    instanceJS.put("digital_object", mapper.getReferenceObject(digitalObjectURI));
-                    instancesJA.put(instanceJS);
-
-                    if (debug) print("Added Digital Object Instance to " + recordTitle);
-                }
+        if (collectionMap != null) {
+            digitalObjectList = collectionMap.get(contentID);
+            if (digitalObjectList == null) {
+                digitalObjectList = new ArrayList<JSONArray>();
             }
+        } else {
+            collectionMap = new HashMap<Integer, ArrayList<JSONArray>>();
+            digitalObjectList = new ArrayList<JSONArray>();
+        }
 
-            if (instancesJA.length() != 0) {
-                json.put("instances", instancesJA);
+        if (noCollectionMap != null && noCollectionMap.containsKey(contentID)) {
+            digitalObjectList.addAll(noCollectionMap.get(contentID));
+            noCollectionMap.remove(contentID);
+        }
+
+//        if(digitalObjectMap.containsKey(recordKey)) {
+
+        if (recordTitle == null) {
+            try {
+                recordTitle = json.getString("title");
+            } catch (JSONException  e) {
+                recordTitle = "untitled";
             }
+        }
+
+//            ArrayList<JSONArray> digitalObjectList = digitalObjectMap.get(recordKey);
+
+        // to make sure digital objects aren't added twice if component is both intellectual and physical
+//            digitalObjectMap.remove(recordKey);
+        collectionMap.remove(contentID);
+
+        for(JSONArray batchJA: digitalObjectList) {
+            String digitalObjectURI = saveDigitalObject(batchEndpoint, batchJA);
+
+            if(digitalObjectURI != null) {
+                JSONObject instanceJS = new JSONObject();
+                instanceJS.put("instance_type", "digital_object");
+                instanceJS.put("digital_object", mapper.getReferenceObject(digitalObjectURI));
+                instancesJA.put(instanceJS);
+
+                if (debug) print("Added Digital Object Instance to " + recordTitle);
+            }
+        }
+
+        if (instancesJA.length() != 0) {
+            json.put("instances", instancesJA);
         }
     }
 
@@ -1958,166 +2202,6 @@ public class ASpaceCopyUtil implements  PrintConsole {
         if (accessionsJA.length() != 0) {
             json.put("related_accessions", accessionsJA);
         }
-    }
-
-    /**
-     * Method to return the parent id. This is needed in case we have a parent that a type 2 so we actually
-     * need to get the grandparent, or even older is this case
-     *
-     * @param resourceComponents
-     * @param containerList
-     * @param componentJS
-     * @param parentId
-     * @return
-     */
-    private int getParentId(JSONObject resourceComponents, final ArrayList<String> containerList, JSONObject componentJS, Integer parentId) throws Exception {
-        int topParentId= 0;
-
-        while (parentId != 0  && resourceComponents.has(parentId.toString())) {
-            JSONObject parent = resourceComponents.getJSONObject(parentId.toString());
-
-            if(parent.getInt("ContentType") == 2) {
-                parentId = parent.getInt("ParentID");
-
-                if(componentJS != null) {
-                    // save the sort order number of the parent for proper sorting
-                    String paddedSortOrder = String.format("%05d", parent.getInt("SortOrder"));
-                    componentJS.put("sort_key2", paddedSortOrder);
-                } else {
-                    System.out.println("Adding Analog Instance");
-                }
-
-                // store the container information for this physical only instance
-                // in the Archon component record for convenience
-                addContainerListInformation(containerList, parent);
-            } else {
-                topParentId = parentId;
-                break;
-            }
-        }
-
-        return topParentId;
-    }
-
-    /**
-     *
-     * @param containerList
-     * @param component
-     */
-    private void addContainerListInformation(final ArrayList<String> containerList, JSONObject component) throws JSONException {
-        String type = enumUtil.getASpaceInstanceContainerType(component.getString("ContainerTypeID"));
-        String indicator = component.getString("ContainerIndicator");
-        containerList.add(type + "::" + indicator + "::" + component.get("ID") + "::" + component.get("SortOrder"));
-
-        // store this container list in a hashmap to make looking up the parent container information later
-        containerListMap.put(component.getString("ID"), containerList);
-    }
-
-    /**
-     * Method to add json object to the parent map for generating the object tree more efficiently
-     *
-     * @param parentMap
-     * @param parentId
-     * @param componentJS
-     */
-    private void addComponentToParentMap(HashMap<String, JSONObject> parentMap, int parentId, JSONObject componentJS) throws Exception {
-        String key  = "parent_" + parentId;
-
-        String sort_key = "";
-        if(!componentJS.getString("sort_key2").isEmpty()) {
-            sort_key = componentJS.getString("sort_key2") + "_" + componentJS.getString("sort_key1");
-        } else {
-            sort_key = componentJS.getString("sort_key1");
-        }
-
-        JSONObject childrenJS = new JSONObject();
-
-        if(parentMap.containsKey(key)) {
-            childrenJS = parentMap.get(key);
-        } else {
-            parentMap.put(key, childrenJS);
-        }
-
-        childrenJS.put(sort_key, componentJS);
-    }
-
-    /**
-     * Method to redo the sort order for the components, and at the same time check to see if the
-     * parent child relationships are valid
-     */
-    private String redoComponentSortOrder(HashMap<String, JSONObject> parentMap) throws Exception {
-        // this collections are used to find invalid parent child relations which would cause the
-        // the record to fail to save due to infinite loop situation
-        ArrayList topLevelParentList = new ArrayList();
-        HashMap<String, JSONObject> childrenMap = new HashMap<String, JSONObject>();
-
-        for(String key: parentMap.keySet()) {
-            JSONObject childrenJS = parentMap.get(key);
-
-            System.out.println("Redo sort order for: " + key + " number of children: " + childrenJS.length());
-
-            int i = 0;
-            Iterator<String> keys = childrenJS.sortedKeys();
-            while(keys.hasNext()) {
-                String childKey = keys.next();
-                JSONObject componentJS = childrenJS.getJSONObject(childKey);
-                System.out.println("sort Key: " + childKey);
-                componentJS.put("position", i++);
-
-                String id = getIdFromURI(componentJS.getString("uri"));
-                if(key.equals("parent_0")) {
-                    topLevelParentList.add(id);
-                } else {
-                    childrenMap.put(id, componentJS);
-                }
-            }
-        }
-
-        // lets verify if we have a valid parent
-        return verifyChildParentRelationship(topLevelParentList, childrenMap).trim();
-    }
-
-    /**
-     * Method to verify that a child record can actually
-     *
-     * @param topLevelParentList
-     * @param childrenMap
-     */
-    private String verifyChildParentRelationship(ArrayList topLevelParentList, HashMap<String, JSONObject> childrenMap) throws JSONException {
-        ArrayList<JSONObject> invalidChildrenList = new ArrayList<JSONObject>();
-        StringBuilder sb = new StringBuilder();
-
-        for(String childId: childrenMap.keySet()) {
-            JSONObject childJS = childrenMap.get(childId);
-            String parentId = getIdFromURI(childJS.getString("parent"));
-
-            int lc = 0; // the loop count
-            while(!topLevelParentList.contains(parentId)) {
-                lc++;
-
-                JSONObject parentJS = childrenMap.get(parentId);
-
-                parentId = getIdFromURI(parentJS.getString("parent"));
-
-                // we should never loop more than 12 times. If we do, this indicates
-                // a problem with parent child relationship
-                if(lc == 12) {
-                    invalidChildrenList.add(childJS);
-                    sb.append(childId + " ");
-                    break;
-                }
-            }
-        }
-
-        // for each of the invalid children remove the parent reference to allow the record to save
-        for (JSONObject childJS : invalidChildrenList) {
-            childJS.remove("parent");
-        }
-
-        print("Number of Invalid Child/Parent Relationships: " + invalidChildrenList.size());
-
-        // return the inverse of if we have any invalid children
-        return sb.toString();
     }
 
     /**
@@ -2320,66 +2404,129 @@ public class ASpaceCopyUtil implements  PrintConsole {
     }
 
     /**
-     * Method to add an instance to an Accession or Resource record whick hold location information
-     *
-     * @param recordJS
+     * Method to add an instance to an Accession or Resource record which hold location information
+     *  @param recordJS
      * @param locations
      */
-    private void addLocationInstances(JSONObject recordJS, JSONArray locations, String instanceType) throws Exception {
+    private void addLocationInstances(JSONObject recordJS, JSONArray locations, String instanceType,
+                                      HashMap<String, String> topContainerURIs, String repoURI) throws Exception {
+        if (topContainerURIs == null) topContainerURIs = new HashMap<String, String>();
+
         JSONArray instancesJA = new JSONArray();
 
         for (int i = 0; i < locations.length(); i++) {
-            JSONObject instanceJS = new JSONObject();
+
             JSONObject location = locations.getJSONObject(i);
 
-            // set the type
-            instanceJS.put("instance_type", instanceType);
+            String[] info = getTypeAndIndicator(location.getString("Content"));
 
-            // add the container now
-            JSONObject containerJS = new JSONObject();
+            String containerType = info[0];
 
-            containerJS.put("type_1", "box");
-            containerJS.put("indicator_1", location.get("Content"));
+            ArrayList<String> containerIndicators = getContainerIndicators(info[1]);
 
-            // add the extent information
-            if(location.has("Extent")) {
-                containerJS.put("container_extent", location.getString("Extent"));
-                containerJS.put("container_extent_type", enumUtil.getASpaceExtentType(location.getInt("ExtentUnitID")));
+            for (String containerIndicator : containerIndicators) {
+
+                String topContainerURI = null;
+                String containerKey = containerType + " " + containerIndicator;
+
+                topContainerURI = topContainerURIs.get(containerKey);
+
+                if (topContainerURI == null) {
+                    createInstanceForLocation(location, instanceType, containerType, containerIndicator, instancesJA,
+                            topContainerURIs, repoURI);
+                } else {
+                    try {
+                        JSONObject containerJS = new JSONObject(aspaceClient.get(topContainerURI, null));
+                        addLocationInfo(containerJS, location);
+                        String id = saveRecord(topContainerURI, containerJS.toString(), null);
+                        if (!id.equalsIgnoreCase(NO_ID)) {
+                            print("Added Location to Top Container: " + containerKey);
+                        } else {
+                            print("Fail -- Add location to Top Container: " + containerKey);
+                        }
+                    } catch (NullPointerException e) {
+                        print("Fail -- Add location to Top Container: " + containerKey + "\nCould not load " + topContainerURI);
+                    }
+                }
             }
-
-            // add a location record record now
-            String building = location.getString("Location");
-            String coordinate1 = location.getString("RangeValue");
-            String coordinate2 = location.getString("Section");
-            String coordinate3 = location.getString("Shelf");
-
-            String locationURI = getLocationURI(building, coordinate1, coordinate2, coordinate3);
-
-            if(locationURI != null) {
-                Date date = new Date(); // this is need to have valid container_location json record
-
-                JSONArray locationsJA = new JSONArray();
-
-                JSONObject locationJS = new JSONObject();
-                locationJS.put("status", "current");
-                locationJS.put("start_date", date);
-                locationJS.put("ref", locationURI);
-
-                locationsJA.put(locationJS);
-
-                // put all the records together now
-                containerJS.put("container_locations", locationsJA);
-            }
-
-            instanceJS.put("container", containerJS);
-
-            instancesJA.put(instanceJS);
         }
 
         // if we had any instances add them parent json record
         if (instancesJA.length() != 0) {
             recordJS.put("instances", instancesJA);
         }
+    }
+
+    /**
+     * this attempts to tell if the location content is referring to multiple containers
+     * again, could be better but not worth increasing migration time too much
+     *
+     * @param indicatorsString
+     * @return
+     */
+    private ArrayList<String> getContainerIndicators(String indicatorsString) {
+        ArrayList<String> containerIndicators = new ArrayList<String>();
+
+        // split at commas since they probably indicate separate items
+        String[] commasSplit = indicatorsString.split(",");
+        for (String str: commasSplit) {
+
+            // a dash probably indicates a range
+            // if the items on either side are numbers use these numbers and if so add these and all in between
+            if (str.contains("-")) {
+                String[] bounds = str.split("-");
+                if (bounds.length == 2) {
+                    try {
+                        int start = Integer.parseInt(bounds[0].trim());
+                        int end = Integer.parseInt(bounds[1].trim());
+                        if (start >= end) throw new NumberFormatException();
+                        for (int i = start; i <= end; i++) {
+                            containerIndicators.add(i + "");
+                        }
+                    } catch (NumberFormatException e) {
+                        containerIndicators.add(str.trim());
+                    }
+                }
+            } else {
+                containerIndicators.add(str.trim());
+            }
+        }
+        return containerIndicators;
+    }
+
+    /**
+     * creates an instance for a location that is linked to a resource/accession
+     *
+     * @param location
+     * @param instanceType
+     * @param containerType
+     * @param containerIndicator
+     * @param instancesJA
+     * @param topURIs
+     * @param repoURI
+     * @throws Exception
+     */
+    public void createInstanceForLocation(JSONObject location, String instanceType, String containerType,
+                                          String containerIndicator, JSONArray instancesJA,
+                                          HashMap<String, String> topURIs, String repoURI) throws Exception {
+        JSONObject instanceJS = new JSONObject();
+
+        // set the type
+        instanceJS.put("instance_type", instanceType);
+
+        // add the container now
+        JSONObject containerJS = new JSONObject();
+
+        String containerURI = addTopContainer(containerType, containerIndicator, topURIs, repoURI,
+                location);
+        JSONObject containerRef = mapper.getReferenceObject(containerURI);
+
+        containerJS.put("top_container", containerRef);
+
+        instanceJS.put("sub_container", containerJS);
+
+        instancesJA.put(instanceJS);
+
     }
 
     /**
@@ -2391,6 +2538,7 @@ public class ASpaceCopyUtil implements  PrintConsole {
      * @return
      */
     private String getLocationURI(String building, String coordinate1, String coordinate2, String coordinate3) throws Exception {
+
         String key = building;
 
         // lets create a JSON object for the location in case we need to save it
@@ -2436,6 +2584,40 @@ public class ASpaceCopyUtil implements  PrintConsole {
             } else {
                 print("Fail -- Location: " + key);
                 return null;
+            }
+        }
+    }
+
+    /**
+     * if after going through all the resources a digital object liked resource/component is not found add it
+     *
+     * @throws Exception
+     */
+    public void copyDigitalObjectStragglers() throws Exception {
+
+        for (int rid : digitalObjectMap.keySet()) {
+
+            HashMap<Integer, ArrayList<JSONArray>> leftoverDOs = digitalObjectMap.get(rid);
+
+            if (leftoverDOs != null) {
+
+                String repoURI = getRepositoryURI(defaultRepositoryId);
+                String batchEndpoint = repoURI + ASpaceClient.BATCH_IMPORT_ENDPOINT;
+
+                for (int cid : leftoverDOs.keySet()) {
+                    ArrayList<JSONArray> digitalObjects = leftoverDOs.get(cid);
+                    String message = "Digital object linked resource/component not found: Resource " +
+                            rid + ", Component " + cid + "\nLinked to " + digitalObjects.size() +
+                            " digital object(s). Digital object(s) will be unlinked in stead.\n";
+                    addErrorMessage(message);
+
+                    for (JSONArray digitalObjectJA : digitalObjects) {
+                        saveDigitalObject(batchEndpoint, digitalObjectJA);
+                    }
+                }
+
+                // update the number of digital records that were copied
+                updateRecordTotals("Instance Digital Objects", digitalObjectTotal, digitalObjectSuccess);
             }
         }
     }
@@ -2795,7 +2977,7 @@ public class ASpaceCopyUtil implements  PrintConsole {
 
         String totalRecordsCopied = getTotalRecordsCopiedMessage();
 
-        print("\n\nFinish coping data ... Total time: " + stopWatch.getPrettyTime());
+        print("\n\nFinish copying data ... Total time: " + stopWatch.getPrettyTime());
         print("\nNumber of Records copied: \n" + totalRecordsCopied);
 
         print("\nNumber of errors/warnings: " + aspaceErrorCount);
@@ -3002,11 +3184,6 @@ public class ASpaceCopyUtil implements  PrintConsole {
         aspaceCopyUtil.getSession();
         aspaceCopyUtil.setBBCodeOption("-bbcode_html");
 
-        // set any specific records to copy
-        ArrayList<String> resourcesIDsList = new ArrayList<String>();
-        //resourcesIDsList.add("27-3");
-        //aspaceCopyUtil.setResourcesToCopyList(collectionsIDsList);
-
         try {
             /*
             File recordDirectory = new File("/Users/nathan/temp/JSON_Records");
@@ -3036,5 +3213,13 @@ public class ASpaceCopyUtil implements  PrintConsole {
         // print out the error messages
         System.out.println("\n\nSave Errors:\n" + aspaceCopyUtil.getSaveErrorMessages());
         System.exit(0);
+    }
+
+    public void addContainerTypeValueToIDMapping(String value, String id) {
+        archonValuesToIDs.put(value.toLowerCase().trim(), id);
+    }
+
+    private String getContainerTypeArchonID(String value) {
+        return archonValuesToIDs.get(value.toLowerCase().trim());
     }
 }

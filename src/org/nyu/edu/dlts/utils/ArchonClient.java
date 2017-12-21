@@ -776,7 +776,8 @@ public class ArchonClient {
         while (keys.hasNext()) {
             String key = keys.next();
             JSONObject jsoToAdd = jso.getJSONObject(key);
-            jsonObject.put(key, jsoToAdd);
+            String id = jsoToAdd.getString("ID");
+            jsonObject.put(id, jsoToAdd);
         }
     }
 
@@ -861,8 +862,10 @@ public class ArchonClient {
      */
     public static void main(String[] args) throws JSONException {
         //String host = "http://archives-dev.library.illinois.edu/archondev/tracer";
-        String host = "http://localhost/~nathan/archon";
-        ArchonClient archonClient = new ArchonClient(host, "sa", "admin");
+        String host = System.getenv("ARCHON_CLIENT_HOST");
+        String user = System.getenv("ARCHON_CLIENT_USER");
+        String pass = System.getenv("ARCHON_CLIENT_PASS");
+        ArchonClient archonClient = new ArchonClient(host, user, pass);
         archonClient.getSession();
 
         // the json object containing list of records
@@ -906,6 +909,33 @@ public class ArchonClient {
         // get the digital object records
         records = archonClient.getDigitalObjectRecords();
         System.out.println("Total Digital Objects: " + records.length());
+
+        Iterator<String> keys = records.keys();
+        while(keys.hasNext()) {
+            String key = keys.next();
+            JSONObject recordJS = records.getJSONObject(key);
+            // System.out.println(recordJS); // SHOW THE GENERATED JSON
+            ASpaceMapper mapper = new ASpaceMapper();
+            try {
+                JSONObject dobj  = mapper.convertDigitalObject(recordJS);
+                 // System.out.println(dobj); // SHOW THE DOBJ JSON PAYLOAD
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            if (recordJS.has("components")) {
+                JSONArray components = recordJS.getJSONArray("components");
+                for (int i=0 ; i < components.length(); i++) {
+                    JSONObject component = components.getJSONObject(i);
+                    // System.out.println(component); // SHOW THE COMPONENT
+                    try {
+                        JSONObject dobjc  = mapper.convertToDigitalObjectComponent(component);
+                        // System.out.println(dobjc); // SHOW THE DOBJC PAYLOAD
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
 
         /*records = archonClient.getCollectionRecords();
         System.out.println("Total Collection Records: " + records.length());

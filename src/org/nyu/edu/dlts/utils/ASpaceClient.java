@@ -44,6 +44,8 @@ public class ASpaceClient {
     public static final String AGENT_SOFTWARE_ENDPOINT = "/agents/software";
     public static final String ENUM_ENDPOINT = "/config/enumerations";
     public static final String BATCH_IMPORT_ENDPOINT = "/batch_imports?migration=ArchivistToolkit";
+    public static final String TOP_CONTAINER_ENDPOINT = "/top_containers";
+    public static final String LOCATION_PROFILE_ENDPOINT = "/location_profiles";
 
     private HttpClient httpclient = new HttpClient();
     private String host = "";
@@ -154,7 +156,8 @@ public class ASpaceClient {
         // Prepare HTTP post method.
         String fullUrl = host + route;
         PostMethod post = new PostMethod(fullUrl);
-        post.setRequestEntity(new StringRequestEntity(jsonText, "application/json", null));
+
+        post.setRequestEntity(new StringRequestEntity(jsonText, "application/json", "UTF-8"));
 
         // set any parameters
         if (params != null) {
